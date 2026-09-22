@@ -1,0 +1,45 @@
+name: Publish generated website
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify the exact prepared output
+        shell: python
+        run: |
+          import hashlib, json, pathlib, subprocess
+          manifest = pathlib.Path('.forest-output-manifest.json')
+          expected = json.loads(manifest.read_text())
+          paths = subprocess.check_output(['git', 'ls-files', '-z']).decode().split('\0')
+          actual = {}
+          for name in filter(None, paths):
+              path = pathlib.Path(name)
+              if path.is_symlink() or not path.is_file() or path.suffix.lower() == '.tree':
+                  raise SystemExit('Unexpected source, symlink or special file in output')
+              if path != manifest:
+                  actual[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+          if actual != expected:
+              raise SystemExit('Merged files differ from the prepared output; publication stopped')
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: .
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
